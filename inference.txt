@@ -1,0 +1,23 @@
+// psnr and ssim
+python experiment.py \
+--all_ckpt ./experiment_ckpt/all.pth \
+--noWgan_ckpt ./experiment_ckpt/noWgan.pth \
+--noSobel_ckpt ./experiment_ckpt/noSobel.pth \
+--testpath ./final_test_images \
+--outpath ./experiment_ckpt/inf_images \
+--experiment integrated
+
+// ablation study
+python experiment.py \
+--all_ckpt ./experiment_ckpt/all.pth \
+--noWgan_ckpt ./experiment_ckpt/noWgan.pth \
+--noSobel_ckpt ./experiment_ckpt/noSobel.pth \
+--testpath ../../data/imagenet/test \
+--outpath ./experiment_ckpt/ablation \
+--experiment ablation
+
+// run experiment on coloring
+python inference.py \
+--weight_path ./experiment_ckpt/all.pth \
+--gray_dir ./final_test_grayscales \
+--out_dir ./final_gray2color

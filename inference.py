@@ -1,87 +1,63 @@
-import csv
-import time
-from turtle import color
-
-import cv2
-import matplotlib.pyplot as plt
+import glob
 import numpy as np
+import time
 import torch
-import torch.nn as nn
+import argparse
+import glob
 import torchvision.transforms as transforms
+from unet import ResNetUNet
 
-from data import get_miniImagenet_dataset
+from PIL import Image
+from utils import lab_to_rgb
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--weight_path", required=True,
+                    type=str, default='./checkpoint')
+parser.add_argument("--gray_dir", required=True, type=str,
+                    default="../../data/imagenet")
+parser.add_argument("--out_dir", required=True,
+                    type=str, default="./out_results")
+args = parser.parse_args()
 
-def get_model(epoch):
-    print("========== Loading model....")
-    model = torch.load(f'./G_conv_epoch{epoch}.pth')
-    print("========== Model loaded!")
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def get_model():
+    model = torch.load(args.weight_path)
     return model
 
-def get_test_loader():
-    print("========== Loading dataset")
-    test_loader = get_miniImagenet_dataset(batchsize=64, shape=(128, 128), phase='test')
-    print("========== Dataset loaded!")
-    return test_loader
-
-def demo_inference():
-    model = get_model(19).cuda()
+def demo_inference(args):
+    model = get_model().to(device)
     model.requires_grad = False
-    
-    path = None
-    with open("./data/mini-imagenet/test.csv", mode='r') as f:
-        r = np.random.randint(1, 12002)
-        reader = csv.reader(f)
-        filename = ""
-        for i, row in enumerate(reader):
-            if i == r:
-                filename = row[0]
-                break
-        path = f"./data/mini-imagenet/images/{filename}"
 
-    print(path)
-    colored = cv2.imread(path)
-    gray = cv2.cvtColor(colored, cv2.COLOR_BGR2GRAY)
-    colored = cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
+    paths = glob.glob(f"{args.gray_dir}/*")
+    for i, path in enumerate(paths):
+        img = Image.open(path).convert("L")
+        img = np.array(img)
+        img = img / 255 - 1
+        img = img.astype("float32")
+        l = transforms.ToTensor()(img)
+        l = transforms.Resize((256, 256))(l)
+        l = torch.unsqueeze(l, dim=0).to(device)
+        ab = torch.zeros((1, 2, 256, 256)).to(device)
 
-    gray = cv2.resize(gray, [128, 128])
-    colored = cv2.resize(colored, [128, 128])
+        model.net_G.eval()
+        with torch.no_grad():
+            tic1 = time.time()
+            model.setup_input(l, ab)
+            model.forward()
+            tic2 = time.time()
+        model.net_G.train()
 
-    transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize(size=[128, 128]),
-        transforms.ToTensor(),
-    ])
-    tensor_gray = transform(gray)
-    tensor_gray = torch.cat([tensor_gray, tensor_gray, tensor_gray], dim=0)
-    tensor_gray = tensor_gray.unsqueeze(0).cuda()
+        fake_color = model.fake_color.detach()
+        L = model.L
 
-    toc1 = time.perf_counter()
-    gen = model(tensor_gray).detach().cpu().squeeze(0)
-    toc2 = time.perf_counter()
+        fake_img = lab_to_rgb(L, fake_color)[0] * 255
+        fake = Image.fromarray(np.uint8(fake_img))
 
-    print("===============================")
-    print("|")
-    print(f"| used {toc2-toc1} second to generate a image")
-    print("|")
-    print("===============================")
-    
-    gen = np.transpose(gen, (1, 2, 0))
-    print("done generating")
+        save_path = f'{args.out_dir}/{i}.png'
+        fake.save(save_path)
 
-    plt.subplot(1, 3, 1)
-    plt.title("gray scale image")
-    plt.imshow(gray, cmap='gray')
-
-    plt.subplot(1, 3, 2)
-    plt.title("ground truth")
-    plt.imshow(colored)
-
-    plt.subplot(1, 3, 3)
-    plt.title("Our Model")
-    plt.imshow(gen, vmin=0, vmax=1)
-
-    plt.show()
+        print(f"Colorized and Saved {i+1}/{len(paths)} images, took {tic2-tic1} sec")
 
 if __name__ == "__main__":
-    demo_inference()
+    demo_inference(args)

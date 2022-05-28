@@ -1,60 +1,60 @@
+import matplotlib.pyplot as plt
+import random
+import numpy as np
+import glob
+from PIL import Image
+from skimage.color import rgb2lab
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-import matplotlib.pyplot as plt
-import numpy as np
-import cv2
-import csv
 
 class miniImagenet(Dataset):
-    def __init__(self, phase='train', transforms=None):
+    def __init__(self, args, phase='train', size=8000, transforms=None):
         super().__init__()
-        self.transforms = transforms
+        self.transform = transforms
         self.paths = []
 
-        assert(phase == 'train' or phase == 'test' or phase == 'val' or phase == None)
+        path = f"{args.dataroot}/{phase}"
+        self.paths = glob.glob(f"{path}/*.JPEG")
+        random.shuffle(self.paths)
+        self.paths = self.paths[:min(len(self.paths), size)]
 
-        path = './data/mini-imagenet/' + phase + '.csv'
-        with open(path, mode='r') as f:
-            reader = csv.reader(f)
-            for i, row in enumerate(reader):
-                if i != 0:
-                    self.paths.append('./data/mini-imagenet/images/' + row[0])
-            
-    
+        print(f"Dataset size: {len(self.paths)} images")
+
     def __getitem__(self, index):
-        path = self.paths[index] # path of colored image
+        path = self.paths[index]  # path of colored image
 
-        y_tr = cv2.imread(path)
-        x_tr = cv2.cvtColor(y_tr, cv2.COLOR_BGR2GRAY)
-        y_tr = cv2.cvtColor(y_tr, cv2.COLOR_BGR2RGB)
+        image = Image.open(path).convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        image = np.array(image)
+        lab = rgb2lab(image).astype("float32")
+        lab = transforms.ToTensor()(lab)
 
-        if self.transforms:
-            x_tr, y_tr = self.transforms(x_tr), self.transforms(y_tr)
-        
-        return (x_tr, y_tr)
-    
+        l = lab[[0], ...] / 100 - 1  # [-1, 1]
+        ab = lab[[1, 2], ...] / 110  # [-1, 1]
+
+        return (l, ab)
+
     def __len__(self):
         return len(self.paths)
 
-def get_miniImagenet_dataset(batchsize=64, shape=(224, 224), phase='train'):
-    transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize(size=[*shape]),
-        transforms.ToTensor(),
-    ])
+def get_miniImagenet_dataset(args, batchsize=64, size=8000, shape=(224, 224), phase='train'):
+    if phase == 'train':
+        transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.Resize(size=[*shape]),
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize(size=[*shape]),
+        ])
 
-    dataset = miniImagenet(phase=phase, transforms=transform)
-    dataloader = DataLoader(dataset=dataset, shuffle=True, batch_size=batchsize)
+    dataset = miniImagenet(args=args, phase=phase, size=size, transforms=transform)
+    shuffle = False if phase == 'test' else True
+    dataloader = DataLoader(
+        dataset=dataset, shuffle=shuffle, batch_size=batchsize)
 
     return dataloader
-
-def get_miniImagenet_train_val_dataset(batchsize=32, shape=(128, 128)):
-    transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Scale(size=[*shape]),
-        transforms.ToTensor(),
-    ])
-    return
 
 def demo():
     train_loader = get_miniImagenet_dataset(batchsize=64, phase='train')
@@ -84,6 +84,7 @@ def demo():
             plt.imshow(np.transpose(y_tr[0].numpy()))
             plt.show()
             break
+
 
 if __name__ == "__main__":
     demo()
